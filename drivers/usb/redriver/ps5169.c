@@ -263,7 +263,7 @@ static int ps5169_notify_disconnect(struct usb_redriver *r)
 	return 0;
 }
 
-static int ps5169_release_usb_lanes(struct usb_redriver *r, int num)
+static int ps5169_release_usb_lanes(struct usb_redriver *r, int ort, int num)
 {
 	struct ps5169_redriver *ps5169 =
 		container_of(r, struct ps5169_redriver, r);
@@ -284,6 +284,7 @@ static int ps5169_release_usb_lanes(struct usb_redriver *r, int num)
 		ps5169_config_seqs_init(ps5169);
 		ps5169_config_work_mode(ps5169, mode);
 	}
+	ps5169->typec_orientation = ort;
 	return 0;
 }
 
