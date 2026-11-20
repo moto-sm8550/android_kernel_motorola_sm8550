@@ -1782,7 +1782,8 @@ static int haptics_wait_brake_complete(struct haptics_chip *chip)
 	} while (--timeout);
 
 	if (timeout == 0) {
-		dev_warn(chip->dev, "poll HPWR_DISABLED failed after stopped play\n");
+		dev_warn(chip->dev, "poll HPWR_DISABLED failed after stopped play, HPWR_INTF = %#x, budget %u us\n",
+				val, brake_length_us);
 		return haptics_toggle_module_enable(chip);
 	}
 
