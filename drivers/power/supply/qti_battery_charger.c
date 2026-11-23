@@ -9,6 +9,7 @@
 #include <linux/debugfs.h>
 #include <linux/delay.h>
 #include <linux/device.h>
+#include <linux/math64.h>
 #include <linux/firmware.h>
 #include <linux/module.h>
 #include <linux/of.h>
@@ -1249,6 +1250,63 @@ static int battery_psy_set_cycle_count(struct battery_chg_dev *bcdev,
 	return rc;
 }
 
+/*
+ * The firmware TIME_TO_FULL_AVG estimate follows the configured
+ * step-charging plan, so it jumps around while TurboPower switches
+ * between the battery cells in bypass mode.  TIME_TO_FULL_NOW is instead
+ * derived from the measured pack current and the charge still missing,
+ * which is what actually determines how long charging will take.
+ */
+static int battery_psy_get_time_to_full_now(struct power_supply *psy,
+					    union power_supply_propval *pval)
+{
+	union power_supply_propval status, curr_now, chg_cnt, chg_full;
+	s64 remaining_uah, eta_s;
+	int rc;
+
+	rc = power_supply_get_property(psy, POWER_SUPPLY_PROP_STATUS, &status);
+	if (rc < 0)
+		return rc;
+
+	if (status.intval != POWER_SUPPLY_STATUS_CHARGING) {
+		pval->intval = 0;
+		return 0;
+	}
+
+	rc = power_supply_get_property(psy, POWER_SUPPLY_PROP_CURRENT_NOW,
+				       &curr_now);
+	if (rc < 0)
+		return rc;
+
+	rc = power_supply_get_property(psy, POWER_SUPPLY_PROP_CHARGE_COUNTER,
+				       &chg_cnt);
+	if (rc < 0)
+		return rc;
+
+	rc = power_supply_get_property(psy, POWER_SUPPLY_PROP_CHARGE_FULL,
+				       &chg_full);
+	if (rc < 0)
+		return rc;
+
+	if (curr_now.intval <= 0 || chg_full.intval <= 0 || chg_cnt.intval < 0)
+		return -ENODATA;
+
+	remaining_uah = chg_full.intval - chg_cnt.intval;
+	if (remaining_uah <= 0) {
+		pval->intval = 0;
+		return 0;
+	}
+
+	/* charge is in uAh and current in uA, so the result is in seconds */
+	eta_s = div_s64(remaining_uah * 3600, curr_now.intval);
+	if (eta_s > INT_MAX)
+		eta_s = INT_MAX;
+
+	pval->intval = eta_s;
+
+	return 0;
+}
+
 static int battery_psy_get_prop(struct power_supply *psy,
 		enum power_supply_property prop,
 		union power_supply_propval *pval)
@@ -1259,12 +1317,8 @@ static int battery_psy_get_prop(struct power_supply *psy,
 
 	pval->intval = -ENODATA;
 
-	/*
-	 * The prop id of TIME_TO_FULL_NOW and TIME_TO_FULL_AVG is same.
-	 * So, map the prop id of TIME_TO_FULL_AVG for TIME_TO_FULL_NOW.
-	 */
 	if (prop == POWER_SUPPLY_PROP_TIME_TO_FULL_NOW)
-		prop = POWER_SUPPLY_PROP_TIME_TO_FULL_AVG;
+		return battery_psy_get_time_to_full_now(psy, pval);
 
 	prop_id = get_property_id(pst, prop);
 	if (prop_id < 0)
